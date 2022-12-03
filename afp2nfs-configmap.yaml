@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afp2nfs-configmap
+data:
+   AFP2NFS_TIME_CAPSULE_PASSWORD: "super_secret_password"
+   AFP2NFS_TIME_CAPSULE_IP: "1.2.3.4"
+   AFP2NFS_DEBUG: "false"

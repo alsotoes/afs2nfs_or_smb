@@ -1,0 +1,42 @@
+FROM arm64v8/ubuntu:jammy as buildlayer
+
+RUN apt update -y && \
+    apt upgrade -y && \
+    apt install -y build-essential libgcrypt-dev \
+                   libfuse-dev libgmp-dev libreadline-dev \
+                   libncurses-dev wget git && \
+    git clone https://github.com/simonvetter/afpfs-ng.git && \
+    wget https://gist.githubusercontent.com/alsotoes/d64cb088cbbc210fdafba090fab0ebd4/raw/1c1800ef50402095fbde78d2e45e4170a63be1bd/afpfs-ng_headup-patch00.diff && \
+    patch -p0 < afpfs-ng_headup-patch00.diff && cd afpfs-ng && \
+    CFLAGS="-I/usr/local/include -L/usr/local/lib" ./configure --build=arm-unknown-linux-gnu && make && make install
+
+FROM arm64v8/alpine:3.15.0
+LABEL maintainer="Alvaro Soto alvaro@headup.ws"
+WORKDIR /tmp
+
+RUN apk add --no-cache --update --verbose nfs-utils bash supervisor iproute2 libgcrypt libc6-compat fuse musl && \
+    rm -rf /var/cache/apk /tmp /sbin/halt /sbin/poweroff /sbin/reboot && \
+    mkdir -p /usr/local/{bin,lib} /var/lib/nfs/rpc_pipefs /var/lib/nfs/v4recovery /srv/afp /scripts /config && \
+    echo "rpc_pipefs    /var/lib/nfs/rpc_pipefs rpc_pipefs      defaults        0       0" >> /etc/fstab && \
+    echo "nfsd  /proc/fs/nfsd   nfsd    defaults        0       0" >> /etc/fstab
+
+COPY users.conf groups.conf /config/
+COPY entrypoint.sh nfsd.sh /scripts/
+COPY nsswitch.conf supervisord.conf /etc/
+COPY --from=buildlayer /usr/local/bin/afpfs /usr/local/bin/afpfs
+COPY --from=buildlayer /usr/local/bin/afpfsd /usr/local/bin/afpfsd
+COPY --from=buildlayer /usr/local/bin/afpcmd /usr/local/bin/afpcmd
+COPY --from=buildlayer /usr/local/bin/mount_afp /usr/local/bin/mount_afp
+COPY --from=buildlayer /usr/local/bin/afp_client /usr/local/bin/afp_client
+COPY --from=buildlayer /usr/local/bin/afpgetstatus /usr/local/bin/afpgetstatus
+COPY --from=buildlayer /usr/local/lib/libafpclient.a /usr/local/lib/libafpclient.a
+COPY --from=buildlayer /usr/local/lib/libafpclient.la /usr/local/lib/libafpclient.la
+COPY --from=buildlayer /usr/local/lib/libafpclient.so /usr/local/lib/libafpclient.so
+COPY --from=buildlayer /usr/local/lib/libafpclient.so.0 /usr/local/lib/libafpclient.so.0
+COPY --from=buildlayer /usr/local/lib/libafpclient.so.0.0.0 /usr/local/lib/libafpclient.so.0.0.0
+
+EXPOSE 2049/tcp
+
+RUN chmod +x /scripts/entrypoint.sh /scripts/nfsd.sh
+ENTRYPOINT ["/scripts/entrypoint.sh"]
+CMD ["supervisord","-c","/etc/supervisord.conf"]
